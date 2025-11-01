@@ -1,0 +1,162 @@
+---
+title: "sample code_GMM"
+output: html_document
+---
+
+
+
+
+
+
+
+
+```{r}
+EM_algorithm <- function(data1,data2,lower1,upper1,lower2,upper2,num_iterations=1000, convergence_threshold=1e-6) {
+  
+mean_updata <- function(mu,component,center){
+if (component==1){
+  mu <- center}
+  return (mu)
+}
+
+
+
+sigma_updata <- function(sigma,component,lower,upper,sd){
+  if (component == 1){
+    sigma <- (upper-lower)/(2*1.96)
+  }
+  else{
+  sigma <- max(sigma,sd)
+  }
+  return(sigma)
+}
+data1 <- data1[!is.na(data1)] 
+data2 <- data2[!is.na(data2)] 
+num_samples1 <- length(data1)
+num_samples2 <- length(data2)
+
+previousBIC <- Inf
+deltaBICThreshold <- 10  # Set a threshold to determine when the change in BIC is no longer significant
+for (G in 1:9) {
+num_components = G
+# initialize components weight
+weights <- rep(1/num_components, num_components)  
+
+# initialize mean
+means1 <- rep(mean(data1), num_components) 
+means2 <- rep(mean(data2), num_components) 
+means1[1] <- (lower1+upper1)/2
+means2[1] <- (lower2+upper2)/2
+
+# initialize covariance
+cov_matrices1 <-rep(1, num_components)  
+cov_matrices2 <-rep(1, num_components)
+
+
+# EM
+prev_score <- -Inf  
+convergence=0
+success=0
+for (iteration in 1:num_iterations) {
+     # E-step：
+     responsibilities1 <- matrix(0, nrow = num_samples1, ncol = num_components)
+     responsibilities2 <- matrix(0, nrow = num_samples2, ncol = num_components)
+     for (i in 1:num_components) {
+       responsibilities1[, i] <- weights[i] * dnorm(data1, means1[i], cov_matrices1[i])+1e-20
+       responsibilities2[, i] <- weights[i] * dnorm(data2, means2[i], cov_matrices2[i])+1e-20
+     }
+      responsibilities_guyihua1 <- responsibilities1 / rowSums(responsibilities1)
+      responsibilities_guyihua2 <- responsibilities2 / rowSums(responsibilities2)
+     # M-step：
+for (i in 1:num_components) {
+       N_k1 <- sum(responsibilities_guyihua1[, i])
+       N_k2 <- sum(responsibilities_guyihua2[, i])
+       weights[i] <- (N_k1+N_k2)/(num_samples1+num_samples2)
+       means1[i] <- sum(data1*responsibilities_guyihua1[, i])/N_k1
+       means1[i] <- mean_updata(means1[i],i,(lower1+upper1)/2)
+       means2[i] <- sum(data2*responsibilities_guyihua2[, i])/N_k2
+       means2[i] <- mean_updata(means2[i],i,(lower2+upper2)/2)
+       cov_matrices1 [i] <- sqrt(sum(responsibilities_guyihua1[, i] * (data1 - means1[i])^2) / sum(responsibilities_guyihua1[, i]))
+       cov_matrices2 [i] <- sqrt(sum(responsibilities_guyihua2[, i] * (data2 - means2[i])^2) / sum(responsibilities_guyihua2[, i]))
+       cov_matrices1 [i] <- sigma_updata(cov_matrices1[i],i,lower1,upper1,sd(data1))
+       cov_matrices2 [i] <- sigma_updata(cov_matrices2[i],i,lower2,upper2,sd(data2))
+    }
+
+     # Calculate the current likelihood function value
+     for (i in 1:num_components) {
+        responsibilities1[, i] <- weights[i]*dnorm(data1, means1[i], cov_matrices1[i])
+        responsibilities2[, i] <- weights[i]*dnorm(data2, means2[i], cov_matrices2[i])
+     }
+     curr_score1 <- sum(log(apply(responsibilities1, 1, function(x) sum(x+1e-20))))
+     curr_score2 <- sum(log(apply(responsibilities2, 1, function(x) sum(x+1e-20))))
+     curr_score <- curr_score1+curr_score2
+# Determine if the change in the likelihood function is less than the threshold, and if so, terminate the iteration in advance
+if (abs(curr_score - prev_score) < convergence_threshold) {
+  break
+}
+prev_score <- curr_score
+
+}
+
+currentBIC <- -2 * curr_score + log(num_samples1+num_samples2) * (5 * G - 1)
+
+if (previousBIC - currentBIC < deltaBICThreshold) {
+        break  
+}
+else {
+previousBIC <- currentBIC
+bestModel_weight <- weights
+bestModel_means1 <- means1
+bestModel_means2 <- means2
+bestModel_cov_matrices1 <- cov_matrices1
+bestModel_cov_matrices2 <- cov_matrices2
+}
+}
+fitted_params <- list(weight=bestModel_weight, mean1=bestModel_means1, mean2=bestModel_means2, cov_matrices1=bestModel_cov_matrices1, cov_matrices2=bestModel_cov_matrices2, BIC = currentBIC)
+return(fitted_params)
+}
+```
+
+
+```{r}
+library(openxlsx)
+
+
+#address: the path of panel
+panel_ori<-read.xlsx(address)
+#number_of_items： the number of test items in the panel.
+panel_ori <- panel_ori[,3:2+3*number_of_items] #size: 3*number_of_items
+panel_GMM=panel_ori
+
+number_of_items = dim(panel_ori)[2]/3
+for (i in 1:number_of_items){
+table = data.frame(table(panel_ori[,(2*i-1+number_of_items):(2*i+number_of_items)]))
+table = table[table$Freq!=0,]
+table = table[order(as.numeric(as.character(table[,3])),decreasing=T),]
+Number_of_ranges = dim(table)[1]
+if (Number_of_ranges>1){
+  data1 = panel_ori[which(panel_ori[,2*i-1+number_of_items]==table[1,1]&panel_ori[,2*i+number_of_items]==table[1,2]),i]
+  lower1 = as.numeric(as.character(table[1,1]))
+  upper1 = as.numeric(as.character(table[1,2]))
+  sigma_x = (1.96*(as.numeric(as.character(table[1,2]))-as.numeric(as.character(table[1,1])))/2)
+  for (j in 2:Number_of_ranges){
+    if (table[j,3]>30){
+    data2 = panel_ori[which(panel_ori[,2*i-1+number_of_items]==table[j,1]&panel_ori[,2*i+number_of_items]==table[j,2]),i]
+    mu_y = (as.numeric(as.character(table[j,1]))+as.numeric(as.character(table[j,2])))/2
+    lower2 = as.numeric(as.character(table[j,1]))
+    upper2 = as.numeric(as.character(table[j,2]))
+    result<-EM_algorithm(data1,data2,lower1,upper1,lower2,upper2)
+    G = length(result$weight)
+    Y = rep(0,length(data2))
+    for (g in 1:G){
+    Y = result$weight[g]*((data2-result$mean2[g])*result$cov_matrices1[g]/result$cov_matrices2[g]+result$mean1[g])+Y
+    }
+    Y[Y < 0] <- 0
+    panel_GMM[which(panel_ori[,2*i-1+number_of_items]==table[j,1]&panel_ori[,2*i+number_of_items]==table[j,2]),i] <- Y}
+}}
+}
+
+#GMM-transformated result:
+panel_GMM
+#}
+```
